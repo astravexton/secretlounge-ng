@@ -1,16 +1,9 @@
-FROM node:alpine
+FROM python:alpine
 
-WORKDIR /opt/secretlounge
+WORKDIR /usr/src/app
 
-COPY . .
-
-RUN apk update && apk upgrade && \
-  apk add --no-cache python3 bash git && \
-  python3 -m ensurepip && \
-  rm -r /usr/lib/python*/ensurepip && \
-  pip3 install -r requirements.txt && \
-  if [ ! -e /usr/bin/pip ]; then ln -s pip3 /usr/bin/pip ; fi && \
-  if [[ ! -e /usr/bin/python ]]; then ln -sf /usr/bin/python3 /usr/bin/python; fi && \
-  rm -r /root/.cache
+COPY . ./
+RUN pip install --no-cache-dir -r requirements.txt
+RUN rm requirements.txt config.yaml.example Dockerfile README.md
 
 CMD ["./secretlounge-ng"]
