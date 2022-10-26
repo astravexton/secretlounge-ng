@@ -1,11 +1,12 @@
 import logging
 import itertools
 from datetime import datetime, timedelta
-from threading import Lock
+from threading import RLock
 
 from src.globals import *
 
 class CachedMessage():
+	__slots__ = ('user_id', 'time', 'warned', 'upvoted')
 	def __init__(self, user_id=None):
 		self.user_id = user_id # who has sent this message
 		self.time = datetime.now() # when was this message seen?
@@ -20,7 +21,7 @@ class CachedMessage():
 
 class Cache():
 	def __init__(self):
-		self.lock = Lock()
+		self.lock = RLock()
 		self.counter = itertools.count()
 		self.msgs = {} # dict(msid -> CachedMessage)
 		self.idmap = {} # dict(uid -> dict(msid -> opaque))
@@ -34,12 +35,10 @@ class Cache():
 		if msid is not None:
 			return x[uid].get(msid, None)
 		# data is not None
-		try:
-			return next(msid for msid, _data in x[uid].items() if _data == data)
-		except StopIteration as e:
-			return None
+		gen = ( msid for msid, _data in x[uid].items() if _data == data )
+		return next(gen, None)
 
-	def assignMessageId(self, cm):
+	def assignMessageId(self, cm: CachedMessage) -> int:
 		with self.lock:
 			ret = next(self.counter)
 			self.msgs[ret] = cm
@@ -47,6 +46,10 @@ class Cache():
 	def getMessage(self, msid):
 		with self.lock:
 			return self.msgs.get(msid, None)
+	def iterateMessages(self, functor):
+		with self.lock:
+			for msid, cm in self.msgs.items():
+				functor(msid, cm)
 	def saveMapping(self, uid, msid, data):
 		with self.lock:
 			self._saveMapping(self.idmap, uid, msid, data)
@@ -55,6 +58,10 @@ class Cache():
 			raise ValueError()
 		with self.lock:
 			return self._lookupMapping(self.idmap, uid, msid, data)
+	def deleteMappings(self, msid):
+		with self.lock:
+			for d in self.idmap.values():
+				d.pop(msid, None)
 	def expire(self):
 		ids = set()
 		with self.lock:
@@ -62,9 +69,9 @@ class Cache():
 				if not self.msgs[msid].isExpired():
 					continue
 				ids.add(msid)
-				del self.msgs[msid] # delete from primary cache
-				for d in self.idmap.values(): # delete from id mapping
-					d.pop(msid, None)
+				# delete message itself and from mappings
+				del self.msgs[msid]
+				self.deleteMappings(msid)
 		if len(ids) > 0:
 			logging.debug("Expired %d entries from cache", len(ids))
 		return ids

@@ -29,14 +29,14 @@ types = NumericEnum([
 	"CUSTOM",
 	"SUCCESS",
 	"BOOLEAN_CONFIG",
-	"SIGNED_MSG",
-	"TSIGNED_MSG",
 
 	"CHAT_JOIN",
 	"CHAT_LEAVE",
 	"USER_IN_CHAT",
 	"USER_NOT_IN_CHAT",
 	"GIVEN_COOLDOWN",
+	"MESSAGE_DELETED",
+	"DELETION_QUEUED",
 	"PROMOTED_MOD",
 	"PROMOTED_ADMIN",
 	"KARMA_THANK_YOU",
@@ -57,8 +57,10 @@ types = NumericEnum([
 	"ERR_UPVOTE_OWN_MESSAGE",
 	"ERR_SPAMMY",
 	"ERR_SPAMMY_SIGN",
+	"ERR_SIGN_PRIVACY",
 	"ERR_INVALID_TRIP_FORMAT",
 	"ERR_NO_TRIPCODE",
+	"ERR_MEDIA_LIMIT",
 
 	"USER_INFO",
 	"USER_INFO_MOD",
@@ -88,9 +90,6 @@ format_strs = {
 	types.SUCCESS: "☑",
 	types.BOOLEAN_CONFIG: lambda enabled, **_:
 		"<b>{description!x}</b>: " + (enabled and "enabled" or "disabled"),
-	types.SIGNED_MSG: "{text!x} <a href=\"tg://user?id={user_id}\">~~{user_text!x}</a>",
-	types.TSIGNED_MSG: "<b>{tripname!x}</b> <code>{tripcode!x}</code>:\n"+
-		"{text!x}",
 
 	types.CHAT_JOIN: em("You joined the chat!"),
 	types.CHAT_LEAVE: em("You left the chat!"),
@@ -99,6 +98,10 @@ format_strs = {
 	types.GIVEN_COOLDOWN: lambda deleted, **_:
 		em( "You've been handed a cooldown of {duration!d} for this message"+
 			(deleted and " (message also deleted)" or "") ),
+	types.MESSAGE_DELETED:
+		em( "Your message has been deleted. No cooldown has been "
+			"given this time, but refrain from posting it again." ),
+	types.DELETION_QUEUED: em("{count} messages matched, deletion was queued."),
 	types.PROMOTED_MOD: em("You've been promoted to moderator, run /modhelp for a list of commands."),
 	types.PROMOTED_ADMIN: em("You've been promoted to admin, run /adminhelp for a list of commands."),
 	types.KARMA_THANK_YOU: em("You just gave this user some sweet karma, awesome!"),
@@ -106,7 +109,7 @@ format_strs = {
 		em( "You've just been given sweet karma! (check /info to see your karma"+
 			" or /toggleKarma to turn these notifications off)" ),
 	types.TRIPCODE_INFO: lambda tripcode, **_:
-		"<b>tripcode</b>: " + ("<code>{tripcode!x}</code>" if tripcode is not None else "unset" ),
+		"<b>tripcode</b>: " + ("<code>{tripcode!x}</code>" if tripcode is not None else "unset"),
 	types.TRIPCODE_SET: em("Tripcode set. It will appear as: ") + "<b>{tripname!x}</b> <code>{tripcode!x}</code>",
 
 	types.ERR_COMMAND_DISABLED: em("This command has been disabled."),
@@ -119,15 +122,17 @@ format_strs = {
 	types.ERR_NOT_IN_COOLDOWN: em("This user is not in a cooldown right now."),
 	types.ERR_BLACKLISTED: lambda reason, contact, **_:
 		em( "You've been blacklisted" + (reason and " for {reason!x}" or "") )+
-		( em("\ncontact:") + " {contact}" ) if contact else "",
+		( em("\ncontact:") + " {contact}" if contact else "" ),
 	types.ERR_ALREADY_UPVOTED: em("You have already upvoted this message."),
 	types.ERR_UPVOTE_OWN_MESSAGE: em("You can't upvote your own message."),
 	types.ERR_SPAMMY: em("Your message has not been sent. Avoid sending messages too fast, try again later."),
 	types.ERR_SPAMMY_SIGN: em("Your message has not been sent. Avoid using /sign too often, try again later."),
+	types.ERR_SIGN_PRIVACY: em("Your account privacy settings prevent usage of the sign feature. Enable linked forwards first."),
 	types.ERR_INVALID_TRIP_FORMAT:
 		em("Given tripcode is not valid, the format is ")+
 		"<code>name#pass</code>" + em("."),
 	types.ERR_NO_TRIPCODE: em("You don't have a tripcode set."),
+	types.ERR_MEDIA_LIMIT: em("You can't send media or forward messages at this time, try again later."),
 
 	types.USER_INFO: lambda warnings, cooldown, **_:
 		"<b>id</b>: {id}, <b>username</b>: {username!x}, <b>rank</b>: {rank_i} ({rank})\n"+
@@ -155,22 +160,29 @@ format_strs = {
 		"<i>Or reply to a message and use</i>:\n"+
 		"  /info - get info about the user that sent this message\n"+
 		"  /warn - warn the user that sent this message (cooldown)\n"+
-		"  /delete - delete a message and warn the user",
+		"  /delete - delete a message and warn the user\n"
+		"  /remove - delete a message without a cooldown/warning",
 	types.HELP_ADMIN:
 		"<i>Admins can use the following commands</i>:\n"+
 		"  /adminhelp - show this text\n"+
 		"  /adminsay &lt;message&gt; - send an official admin message\n"+
-		"  /motd &lt;message&gt; - set the welcome message\n"+
+		"  /motd &lt;message&gt; - set the welcome message (HTML formatted)\n"+
 		"  /uncooldown &lt;id | username&gt; - remove cooldown from an user\n"+
 		"  /mod &lt;username&gt; - promote an user to the moderator rank\n"+
 		"  /admin &lt;username&gt; - promote an user to the admin rank\n"+
+		"  /cleanup - mass delete messages by currently banned users\n"+
 		"\n"+
 		"<i>Or reply to a message and use</i>:\n"+
 		"  /blacklist [reason] - blacklist the user who sent this message",
 }
 
+localization = {}
+
 def formatForTelegram(m):
-	s = format_strs[m.type]
+	s = localization.get(m.type)
+	if s is None:
+		s = format_strs[m.type]
 	if type(s).__name__ == "function":
 		s = s(**m.kwargs)
-	return CustomFormatter().format(s, **m.kwargs)
+	cls = localization.get("_FORMATTER_", CustomFormatter)
+	return cls().format(s, **m.kwargs)
