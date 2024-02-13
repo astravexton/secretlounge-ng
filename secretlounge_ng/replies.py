@@ -1,12 +1,12 @@
 import re
 from string import Formatter
 
-from src.globals import *
+from .globals import *
 
 class NumericEnum(Enum):
 	def __init__(self, names):
 		d = {name: i for i, name in enumerate(names)}
-		super(NumericEnum, self).__init__(d)
+		super().__init__(d)
 
 class CustomFormatter(Formatter):
 	def convert_field(self, value, conversion):
@@ -16,13 +16,13 @@ class CustomFormatter(Formatter):
 			return format_datetime(value)
 		elif conversion == "d": # time[d]elta
 			return format_timedelta(value)
-		return super(CustomFormatter, self).convert_field(value, conversion)
+		return super().convert_field(value, conversion)
 
 # definition of reply class and types
 
 class Reply():
-	def __init__(self, type, **kwargs):
-		self.type = type
+	def __init__(self, type_, **kwargs):
+		self.type = type_
 		self.kwargs = kwargs
 
 types = NumericEnum([
@@ -143,7 +143,7 @@ format_strs = {
 		( cooldown and "yes, until {cooldown!t}" or "no" ),
 	types.USER_INFO_MOD: lambda cooldown, **_:
 		"<b>id</b>: {id}, <b>username</b>: anonymous, <b>rank</b>: n/a, "+
-		"<b>karma</b>: {karma}\n"+
+		"<b>karma bracket</b>: {karma}\n"+
 		"<b>cooldown</b>: "+
 		( cooldown and "yes, until {cooldown!t}" or "no" ),
 	types.USERS_INFO: "<b>{count}</b> <i>users</i>",
@@ -151,7 +151,7 @@ format_strs = {
 		"<b>{active}</b> <i>active</i>, {inactive} <i>inactive and</i> "+
 		"{blacklisted} <i>blacklisted users</i> (<i>total</i>: {total})",
 
-	types.PROGRAM_VERSION: "secretlounge-ng v{version} ~ https://github.com/sfan5/secretlounge-ng",
+	types.PROGRAM_VERSION: "secretlounge-ng v{version} ~ https://github.com/secretlounge/secretlounge-ng",
 	types.HELP_MODERATOR:
 		"<i>Moderators can use the following commands</i>:\n"+
 		"  /modhelp - show this text\n"+

@@ -1,12 +1,13 @@
 import logging
 from datetime import datetime, timedelta
 from threading import Lock
+from importlib import import_module
 
-import src.replies as rp
-from src.globals import *
-from src.database import User, SystemConfig
-from src.cache import CachedMessage
-from src.util import genTripcode
+from . import replies as rp
+from .globals import *
+from .database import User, SystemConfig
+from .cache import CachedMessage
+from .util import genTripcode
 
 db = None
 ch = None
@@ -33,8 +34,7 @@ def init(config, _db, _ch):
 	sign_interval = timedelta(seconds=int(config.get("sign_limit_interval", 600)))
 
 	if config.get("locale"):
-		rp.localization = __import__("src.replies_" + config["locale"],
-			fromlist=["localization"]).localization
+		rp.localization = import_module("..replies_" + config["locale"], __name__).localization
 
 	# initialize db if empty
 	if db.getSystemConfig() is None:
@@ -151,7 +151,7 @@ class Receiver():
 	def reply(m: rp.Reply, msid: int, who, except_who, reply_to: bool):
 		raise NotImplementedError()
 	@staticmethod
-	def delete(msids: list[int]):
+	def delete(msids: 'list[int]'):
 		raise NotImplementedError()
 	@staticmethod
 	def stop_invoked(who, delete_out: bool):
@@ -270,13 +270,13 @@ def get_info_mod(user, msid):
 @requireUser
 def get_users(user):
 	if user.rank < RANKS.mod:
-		n = sum(1 for user in db.iterateUsers() if user.isJoined())
+		n = sum(1 for user2 in db.iterateUsers() if user2.isJoined())
 		return rp.Reply(rp.types.USERS_INFO, count=n)
 	active, inactive, black = 0, 0, 0
-	for user in db.iterateUsers():
-		if user.isBlacklisted():
+	for user2 in db.iterateUsers():
+		if user2.isBlacklisted():
 			black += 1
-		elif not user.isJoined():
+		elif not user2.isJoined():
 			inactive += 1
 		else:
 			active += 1
@@ -287,7 +287,8 @@ def get_users(user):
 @requireUser
 def get_motd(user):
 	motd = db.getSystemConfig().motd
-	if motd == "": return
+	if not motd:
+		return
 	return rp.Reply(rp.types.CUSTOM, text=motd)
 
 @requireUser
@@ -324,7 +325,7 @@ def set_tripcode(user, text):
 	if not enable_signing:
 		return rp.Reply(rp.types.ERR_COMMAND_DISABLED)
 
-	if not (0 < text.find("#") < len(text) - 1):
+	if not 0 < text.find("#") < len(text) - 1:
 		return rp.Reply(rp.types.ERR_INVALID_TRIP_FORMAT)
 	if "\n" in text or len(text) > 30:
 		return rp.Reply(rp.types.ERR_INVALID_TRIP_FORMAT)

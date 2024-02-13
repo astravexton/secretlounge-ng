@@ -3,36 +3,38 @@ import logging
 import time
 import json
 import re
+from typing import Optional
+from functools import partial
 
-import src.core as core
-import src.replies as rp
-from src.util import MutablePriorityQueue, genTripcode
-from src.globals import *
+from . import core
+from . import replies as rp
+from .util import MutablePriorityQueue, genTripcode
+from .globals import *
 
 # module constants
-MEDIA_FILTER_TYPES = ("photo", "animation", "document", "video", "sticker")
+MEDIA_FILTER_TYPES = ("photo", "animation", "document", "video", "video_note", "sticker")
 CAPTIONABLE_TYPES = ("photo", "audio", "animation", "document", "video", "voice")
 HIDE_FORWARD_FROM = set([
-	"anonymize_bot", "AnonFaceBot", "AnonymousForwarderBot", "anonomiserBot",
+	"anonymize_bot", "anonfacebot", "anonymousforwarderbot", "anonomiserbot",
 	"anonymous_forwarder_nashenasbot", "anonymous_forward_bot", "mirroring_bot",
-	"anonymizbot", "ForwardsCoverBot", "anonymousmcjnbot", "MirroringBot",
-	"anonymousforwarder_bot", "anonymousForwardBot", "anonymous_forwarder_bot",
-	"anonymousforwardsbot", "HiddenlyBot", "ForwardCoveredBot", "anonym2bot",
-	"AntiForwardedBot", "noforward_bot", "Anonymous_telegram_bot",
-	"Forwards_Cover_Bot", "ForwardsHideBot", "ForwardsCoversBot",
-	"NoForwardsSourceBot", "AntiForwarded_v2_Bot", "ForwardCoverzBot",
+	"anonymizbot", "forwardscoverbot", "anonymousmcjnbot", "mirroringbot",
+	"anonymousforwarder_bot", "anonymousforwardbot", "anonymous_forwarder_bot",
+	"anonymousforwardsbot", "hiddenlybot", "forwardcoveredbot", "anonym2bot",
+	"antiforwardedbot", "noforward_bot", "anonymous_telegram_bot",
+	"forwards_cover_bot", "forwardshidebot", "forwardscoversbot",
+	"noforwardssourcebot", "antiforwarded_v2_bot", "forwardcoverzbot",
 ])
 VENUE_PROPS = ("title", "address", "foursquare_id", "foursquare_type", "google_place_id", "google_place_type")
 
 # module variables
-bot = None
+bot: telebot.TeleBot = None
 db = None
 ch = None
 message_queue = None
 registered_commands = {}
 
 # settings
-allow_documents = None
+allow_documents: bool = None
 linked_network: dict = None
 
 def init(config, _db, _ch):
@@ -216,9 +218,10 @@ class FormattedMessageBuilder():
 	# insert `content` at `pos`, `html` indicates HTML or plaintext
 	# if `pre` is set content will be inserted *before* existing insertions
 	def insert(self, pos, content, html=False, pre=False):
+		def cat(a, b):
+			return (b + a) if pre else (a + b)
 		i = self.inserts.get(pos)
 		if i is not None:
-			cat = lambda a, b: (b + a) if pre else (a + b)
 			# only turn insert into HTML if strictly necessary
 			if i[0] == html:
 				i = ( i[0], cat(i[1], content) )
@@ -229,16 +232,16 @@ class FormattedMessageBuilder():
 		else:
 			i = (html, content)
 		self.inserts[pos] = i
-	def prepend(self, content, html=False):
+	def prepend(self, content: str, html=False):
 		self.insert(0, content, html, True)
-	def append(self, content, html=False):
+	def append(self, content: str, html=False):
 		self.insert(len(self.text_content), content, html)
-	def enclose(self, pos1, pos2, content_begin, content_end, html=False):
+	def enclose(self, pos1: int, pos2: int, content_begin: str, content_end: str, html=False):
 		self.insert(pos1, content_begin, html)
 		self.insert(pos2, content_end, html, True)
-	def build(self) -> FormattedMessage:
+	def build(self) -> Optional[FormattedMessage]:
 		if len(self.inserts) == 0:
-			return
+			return None
 		html = any(i[0] for i in self.inserts.values())
 		norm = lambda i: i[1] if i[0] == html else escape_html(i[1])
 		s = ""
@@ -333,17 +336,17 @@ def send_thread():
 
 def is_forward(ev):
 	return (ev.forward_from is not None or ev.forward_from_chat is not None
-		or ev.json.get("forward_sender_name") is not None)
+		or ev.forward_sender_name is not None)
 
 def should_hide_forward(ev):
 	# Hide forwards from anonymizing bots that have recently become popular.
 	# The main reason is that the bot API heavily penalizes forwarding and the
 	# 'Forwarded from Anonymize Bot' provides no additional/useful information.
 	if ev.forward_from is not None:
-		return ev.forward_from.username in HIDE_FORWARD_FROM
+		return (ev.forward_from.username or "").lower() in HIDE_FORWARD_FROM
 	return False
 
-def resend_message(chat_id, ev, reply_to=None, force_caption: FormattedMessage=None):
+def resend_message(chat_id, ev, reply_to=None, force_caption: Optional[FormattedMessage]=None):
 	if should_hide_forward(ev):
 		pass
 	elif is_forward(ev):
@@ -383,8 +386,8 @@ def resend_message(chat_id, ev, reply_to=None, force_caption: FormattedMessage=N
 	elif ev.content_type == "video_note":
 		return bot.send_video_note(chat_id, ev.video_note.file_id, **kwargs)
 	elif ev.content_type == "location":
-		kwargs["latitude"] = ev.location.latitude
-		kwargs["longitude"] = ev.location.longitude
+		for prop in ("latitude", "longitude", "horizontal_accuracy"):
+			kwargs[prop] = getattr(ev.location, prop)
 		return bot.send_location(chat_id, **kwargs)
 	elif ev.content_type == "venue":
 		kwargs["latitude"] = ev.venue.location.latitude
@@ -475,6 +478,9 @@ def check_telegram_exc(e, user_id):
 		logging.warning("API rate limit hit, waiting for %ds", d)
 		time.sleep(d)
 		return True # retry
+
+	if "VOICE_MESSAGES_FORBIDDEN" in e.result.text:
+		return False
 
 	logging.exception("API exception")
 	return False
@@ -637,9 +643,9 @@ def cmd_warn(ev, delete=False, only_delete=False):
 		r = core.warn_user(c_user, reply_msid, delete)
 	send_answer(ev, r, True)
 
-cmd_delete = lambda ev: cmd_warn(ev, delete=True)
+cmd_delete = partial(cmd_warn, delete=True)
 
-cmd_remove = lambda ev: cmd_warn(ev, only_delete=True)
+cmd_remove = partial(cmd_warn, only_delete=True)
 
 cmd_cleanup = wrap_core(core.cleanup_messages)
 

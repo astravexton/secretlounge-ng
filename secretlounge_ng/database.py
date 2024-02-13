@@ -5,8 +5,9 @@ import sqlite3
 from datetime import date, datetime, timedelta, timezone
 from random import randint
 from threading import RLock
+from typing import Optional, Generator
 
-from src.globals import *
+from .globals import *
 
 # what's inside the db
 
@@ -24,22 +25,24 @@ USER_PROPS = (
 
 class User():
 	__slots__ = USER_PROPS
+	id: int
+	username: Optional[str]
+	realname: str
+	rank: int
+	joined: datetime
+	left: Optional[datetime]
+	lastActive: datetime
+	cooldownUntil: Optional[datetime]
+	blacklistReason: Optional[str]
+	warnings: int
+	warnExpiry: Optional[datetime]
+	karma: int
+	hideKarma: bool
+	debugEnabled: bool
+	tripcode: Optional[str]
 	def __init__(self):
-		self.id = None # int
-		self.username = None # str?
-		self.realname = None # str
-		self.rank = None # int
-		self.joined = None # datetime
-		self.left = None # datetime?
-		self.lastActive = None # datetime
-		self.cooldownUntil = None # datetime?
-		self.blacklistReason = None # str?
-		self.warnings = None # int
-		self.warnExpiry = None # datetime?
-		self.karma = None # int
-		self.hideKarma = None # bool
-		self.debugEnabled = None # bool
-		self.tripcode = None # str?
+		for k in USER_PROPS:
+			setattr(self, k, None)
 	def __eq__(self, other):
 		if isinstance(other, User):
 			return self.id == other.id
@@ -67,8 +70,10 @@ class User():
 		alpha = "0123456789abcdefghijklmnopqrstuv"
 		return ''.join(alpha[n%32] for n in (value, value>>5, value>>10, value>>15))
 	def getObfuscatedKarma(self):
-		offset = round(abs(self.karma * 0.2) + 2)
-		return self.karma + randint(0, offset + 1) - offset
+		for cutoff in (100, 50, 10):
+			if abs(self.karma) >= cutoff:
+				return max(-cutoff, min(self.karma, cutoff))
+		return 0
 	def getFormattedName(self):
 		if self.username is not None:
 			return "@" + self.username
@@ -129,25 +134,26 @@ class Database():
 		raise NotImplementedError()
 	def close(self):
 		raise NotImplementedError()
-	def getUser(self, id=None):
+	def getUser(self, *, id: Optional[int]=None) -> User:
 		raise NotImplementedError()
-	def setUser(self, id, user):
+	def setUser(self, id: int, user: User):
 		raise NotImplementedError()
-	def addUser(self, user):
+	def addUser(self, user: User):
 		raise NotImplementedError()
-	def iterateUserIds(self):
+	def iterateUserIds(self) -> Generator[int, None, None]:
 		raise NotImplementedError()
-	def getSystemConfig(self):
+	def getSystemConfig(self) -> Optional[SystemConfig]:
 		raise NotImplementedError()
-	def setSystemConfig(self, config):
+	def setSystemConfig(self, config: SystemConfig):
 		raise NotImplementedError()
-	def iterateUsers(self):
+	def iterateUsers(self) -> Generator[User, None, None]:
+		# fallback impl
 		with self.lock:
 			l = list(self.getUser(id=id) for id in self.iterateUserIds())
 		yield from l
-	def modifyUser(self, **kwargs):
+	def modifyUser(self, *, id: Optional[int]=None):
 		with self.lock:
-			user = self.getUser(**kwargs)
+			user = self.getUser(id=id)
 			callback = lambda newuser: self.setUser(user.id, newuser)
 			return ModificationContext(user, callback, self.lock)
 	def modifySystemConfig(self):
@@ -160,7 +166,7 @@ class Database():
 
 class JSONDatabase(Database):
 	def __init__(self, path):
-		super(JSONDatabase, self).__init__()
+		super().__init__()
 		self.path = path
 		self.db = {"systemConfig": None, "users": []}
 		try:
@@ -218,7 +224,7 @@ class JSONDatabase(Database):
 			with open(self.path + "~", "w") as f:
 				json.dump(self.db, f)
 			os.replace(self.path + "~", self.path)
-	def getUser(self, id=None):
+	def getUser(self, *, id=None):
 		if id is None:
 			raise ValueError()
 		with self.lock:
@@ -256,7 +262,7 @@ class JSONDatabase(Database):
 
 class SQLiteDatabase(Database):
 	def __init__(self, path):
-		super(SQLiteDatabase, self).__init__()
+		super().__init__()
 		self.db = sqlite3.connect(path, check_same_thread=False,
 			detect_types=sqlite3.PARSE_DECLTYPES|sqlite3.PARSE_COLNAMES)
 		self.db.row_factory = sqlite3.Row
@@ -325,7 +331,7 @@ CREATE TABLE IF NOT EXISTS `users` (
 			# migration
 			if not row_exists("users", "tripcode"):
 				self.db.execute("ALTER TABLE `users` ADD `tripcode` TEXT")
-	def getUser(self, id=None):
+	def getUser(self, *, id=None):
 		if id is None:
 			raise ValueError()
 		sql = "SELECT * FROM users WHERE id = ?"
